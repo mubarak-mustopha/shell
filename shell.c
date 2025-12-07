@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -30,6 +31,8 @@ pid_t shell_pgid;
 
 int cmd_exit(struct tokens* tokens);
 int cmd_help(struct tokens* tokens);
+int cmd_pwd(struct tokens* tokens);
+int cmd_cd(struct tokens* tokens);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(struct tokens* tokens);
@@ -44,7 +47,35 @@ typedef struct fun_desc {
 fun_desc_t cmd_table[] = {
     {cmd_help, "?", "show this help menu"},
     {cmd_exit, "exit", "exit the command shell"},
+    {cmd_pwd, "pwd", "prints the current working directory"},
+    {cmd_cd, "cd", "changes the current working directory"},
 };
+
+/* Changes the current working directory */
+int cmd_cd(struct tokens* tokens){
+	assert(tokens != NULL);
+	if (tokens->tokens_length != 2){
+		puts("cd takes exactly one argument");
+	}else {
+		if (chdir(tokens->tokens[1]))
+			fprintf(stderr, "cd: %s: %s\n", tokens->tokens[1],strerror(errno));
+		else
+			return 1;
+	}
+	return -1;
+}
+
+/* Prints the current working directory */
+int cmd_pwd(unused struct tokens* tokens){
+	char cwd[1024];
+	if (getcwd(cwd, 1024)){
+		puts(cwd); return 1;
+	}
+	else{
+		fprintf(stderr, "pwd: %s", strerror(errno));
+		return -1;
+	}
+}
 
 /* Prints a helpful description for the given command */
 int cmd_help(unused struct tokens* tokens) {
