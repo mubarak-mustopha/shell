@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "tokenizer.h"
+#include "utils.h"
 
 /* Convenience macro to silence compiler warnings about unused function parameters. */
 #define unused __attribute__((unused))
@@ -121,6 +122,7 @@ void init_shell() {
   }
 }
 
+
 int main(unused int argc, unused char* argv[]) {
   init_shell();
 
@@ -142,7 +144,29 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+	int cpid = fork();
+	if (cpid > 0){
+		// parent process
+		wait(NULL);
+	} else if (cpid == 0){
+		// child process
+
+		/* check if the program is in the current directory and is an executable */
+		char* program = tokens->tokens[0];
+		if (access(program, X_OK) == 0){
+			exec_program(program, tokens->tokens_length, tokens->tokens);
+		} else {
+			/* find program path */
+			char program_path[1024];
+			find_program_path(program, program_path);
+			if (strlen(program_path) != 0)
+				exec_program(program_path, tokens->tokens_length, tokens->tokens);
+		}
+
+		fprintf(stderr, "%s: command not found\n", program);
+	} else {
+		fprintf(stderr, "fork: %s\n", strerror(errno));
+	}
     }
 
     if (shell_is_interactive)
