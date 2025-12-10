@@ -1,9 +1,13 @@
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 void find_program_path(char* program, char* program_path){
         // prog = "/program"
+	assert(program != NULL);
+	assert(program_path != NULL);
+
         char slash_prog[strlen(program) + 2];
         strcpy(slash_prog, "/");
         strcat(slash_prog, program);
@@ -24,13 +28,5 @@ void find_program_path(char* program, char* program_path){
 
         /* path not found */
         program_path[0] = '\0';
-}
-
-void exec_program(char* pathname, int argc, char* argv[]){
-        char* args[argc + 1];
-        for (int i=0; i < argc; i++)
-                args[i] = argv[i];
-        args[argc] = NULL;
-        execv(pathname, args);
 }
 

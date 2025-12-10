@@ -151,16 +151,45 @@ int main(unused int argc, unused char* argv[]) {
 	} else if (cpid == 0){
 		// child process
 
-		/* check if the program is in the current directory and is an executable */
 		char* program = tokens->tokens[0];
+		int arg_c = 0;
+		char* args[tokens->tokens_length + 1];
+		/* check input/output redirection */
+		for (int i = 0; i < tokens->tokens_length;){
+			if (strcmp(tokens->tokens[i], "<") == 0){
+				int fd = open(tokens->tokens[i + 1], O_RDONLY);
+				if (fd < 0){
+					fprintf(stderr, "%s: %s\n", tokens->tokens[i + 1], strerror(errno));
+					exit(1);
+				}
+
+				dup2(fd, STDIN_FILENO);
+				i += 2;
+			} else if (strcmp(tokens->tokens[i], ">") == 0){
+				int fd = open(tokens->tokens[i + 1], O_WRONLY);
+				if (fd < 0){
+					fprintf(stderr, "%s: %s\n", tokens->tokens[i + 1], strerror(errno));
+					exit(1);
+				}
+
+				dup2(fd, STDOUT_FILENO);
+				i += 2;
+			} else {
+				args[i] = tokens->tokens[i];
+				arg_c++;i++;
+			}
+		}
+		/* indicate end of argument with NULL as required by exec */
+		args[arg_c] = NULL;
+		
 		if (access(program, X_OK) == 0){
-			exec_program(program, tokens->tokens_length, tokens->tokens);
+			execv(program, args);
 		} else {
 			/* find program path */
 			char program_path[1024];
 			find_program_path(program, program_path);
 			if (strlen(program_path) != 0)
-				exec_program(program_path, tokens->tokens_length, tokens->tokens);
+				execv(program_path, args);
 		}
 
 		fprintf(stderr, "%s: command not found\n", program);
