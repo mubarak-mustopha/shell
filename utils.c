@@ -23,7 +23,8 @@ void find_program_path(char* program, char* program_path){
                 strcpy(program_path, path);
                 strcat(program_path, slash_prog);
                 if (access(program_path, X_OK) == 0){
-                        return;
+			free(PATHENV);
+		     	return;
                 }
         }
 
