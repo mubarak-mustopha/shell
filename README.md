@@ -4,7 +4,7 @@ A simple UNIX-style shell implemented in C.
 
 ---
 
-## Feature
+## Features
 - Keeps a few list of **built-commands** to run such as `exit`, `?`, `pwd` and `cd`
 - Executes **external programs** by searching for executables  `PATH` environment variable 
 - Supports **input and output redirection** for external commands (e.g `wc < textfile > outputfile`)
