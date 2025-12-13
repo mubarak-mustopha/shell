@@ -242,7 +242,7 @@ int main(unused int argc, unused char* argv[]) {
 				dup2(fd, STDIN_FILENO);
 				i += 2;
 			} else if (strcmp(tokens->tokens[i], ">") == 0){
-				int fd = open(tokens->tokens[i + 1], O_CREAT|O_TRUNC|O_WRONLY, 644);
+				int fd = open(tokens->tokens[i + 1], O_CREAT|O_TRUNC|O_WRONLY, 0644);
 				if (fd < 0){
 					fprintf(stderr, "%s: %s\n", tokens->tokens[i + 1], strerror(errno));
 					exit(1);
