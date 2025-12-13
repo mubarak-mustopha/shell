@@ -48,5 +48,5 @@ cd - changes the current working directory
 8: exit
 ```
 
-## Credits/Acknowledgements
+## Credits / Acknowledgements
 - Based on skeleton code from **UC Berkeley CS162** coursework
