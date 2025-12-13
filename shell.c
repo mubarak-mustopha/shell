@@ -144,18 +144,94 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-	int cpid = fork();
+	
+	/* there cannot be more commands than tokens_length */
+	int *cmd_start_indexes = malloc(sizeof(int) * tokens->tokens_length);
+	cmd_start_indexes[0] = 0;
+
+	/* figure out the number of processes to run */
+	int nprocs = 1;
+	for (int i=0; i < tokens->tokens_length; i++){
+		/* n pipes i.e `|` indicates `n + 1` processes */
+		if (strcmp(tokens_get_token(tokens, i), "|") == 0){
+			cmd_start_indexes[nprocs] = i + 1;
+			nprocs++;
+		}
+	}
+
+	/* fork child processes */
+	int cpid; 
+	int child_idx; // index of child process, esp useful for commands invloving pipes
+
+	if (nprocs > 1) {
+		/* create pipes for inter-process communication */
+		int (*pipe_arr)[2] = malloc(sizeof(int[2]) * (nprocs - 1));
+		int rc = 0;
+		for (int i = 0; i < nprocs - 1; i++){
+			rc = pipe(pipe_arr[i]);
+			if (rc < 0){
+				fprintf(stderr, "pipe: %s", strerror(errno));
+				break;
+			}	
+		}
+		
+		if (rc < 0)
+			continue;
+
+		/* create child processes  */
+		for (int i = 0; i < nprocs; i++){
+			cpid = fork();
+			if (cpid == 0){	
+				child_idx= i;
+				if (i == 0){
+					dup2(pipe_arr[i][1], STDOUT_FILENO);
+					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+				} else if (i == nprocs - 1){
+					dup2(pipe_arr[i - 1][0], STDIN_FILENO);
+					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+				} else {
+					dup2(pipe_arr[i - 1][0], STDIN_FILENO);
+					dup2(pipe_arr[i][1], STDOUT_FILENO);
+					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+				}
+				if (rc < 0){
+					fprintf(stderr, "Error closing fds: %s\n", strerror(errno));	
+				}
+				break;
+			}  else if (cpid < 0){
+				fprintf(stderr, "fork: %s\n", strerror(errno));
+				break;
+			}
+				
+		}
+
+		if (cpid > 0) {
+			/* close all pipe fds for parent */
+			for (int i = 0; i < nprocs - 1; i++){
+				for (int j = 0; j < 2; j++)
+					close(pipe_arr[i][j]);
+			}
+			free(pipe_arr);
+		}
+	    
+	}else {
+		cpid = fork();
+		child_idx= 0;
+	}
+
 	if (cpid > 0){
-		// parent process
-		wait(NULL);
+		// parent process	
+		free(cmd_start_indexes);
+		
+		// wait until last child process terminates
+		waitpid(cpid, NULL, 0);
 	} else if (cpid == 0){
 		// child process
-
-		char* program = tokens->tokens[0];
+		char* program = tokens->tokens[cmd_start_indexes[child_idx]];
 		int arg_c = 0;
-		char* args[tokens->tokens_length + 1];
+		char** args = malloc(sizeof(char*) * (tokens->tokens_length + 1));
 		/* check input/output redirection */
-		for (int i = 0; i < tokens->tokens_length;){
+		for (int i = cmd_start_indexes[child_idx]; i < tokens->tokens_length;){
 			if (strcmp(tokens->tokens[i], "<") == 0){
 				int fd = open(tokens->tokens[i + 1], O_RDONLY);
 				if (fd < 0){
@@ -166,7 +242,7 @@ int main(unused int argc, unused char* argv[]) {
 				dup2(fd, STDIN_FILENO);
 				i += 2;
 			} else if (strcmp(tokens->tokens[i], ">") == 0){
-				int fd = open(tokens->tokens[i + 1], O_WRONLY);
+				int fd = open(tokens->tokens[i + 1], O_CREAT|O_TRUNC|O_WRONLY, 644);
 				if (fd < 0){
 					fprintf(stderr, "%s: %s\n", tokens->tokens[i + 1], strerror(errno));
 					exit(1);
@@ -174,8 +250,10 @@ int main(unused int argc, unused char* argv[]) {
 
 				dup2(fd, STDOUT_FILENO);
 				i += 2;
+			} else if (strcmp(tokens->tokens[i], "|") == 0){
+				break;
 			} else {
-				args[i] = tokens->tokens[i];
+				args[arg_c] = tokens->tokens[i];
 				arg_c++;i++;
 			}
 		}
@@ -188,12 +266,19 @@ int main(unused int argc, unused char* argv[]) {
 			/* find program path */
 			char program_path[1024];
 			find_program_path(program, program_path);
-			if (strlen(program_path) != 0)
-				execv(program_path, args);
+			if (strlen(program_path) == 0){
+				fprintf(stderr, "'%s': command not found\n", program);
+				exit(1);
+			}
+			execv(program_path, args);
+
+			fprintf(stderr, "'%s' command execution failed: %s\n", program_path, strerror(errno));
+			
+			exit(1);
 		}
 
-		fprintf(stderr, "%s: command not found\n", program);
 	} else {
+		free(cmd_start_indexes);
 		fprintf(stderr, "fork: %s\n", strerror(errno));
 	}
     }
