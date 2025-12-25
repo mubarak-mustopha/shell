@@ -1,8 +1,14 @@
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+void print_shell_prompt(bool shell_is_interactive, int* line_num){
+	if (shell_is_interactive)
+		fprintf(stdout, "%d: ", ++(*line_num));
+}
 
 void find_program_path(char* program, char* program_path){
         // prog = "/program"

@@ -126,9 +126,18 @@ void init_shell() {
 int main(unused int argc, unused char* argv[]) {
   init_shell();
 
+  /* signals */
+  struct sigaction sa;
+  sa.sa_flags = 0;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = SIG_IGN;
+  sigaction(SIGTTOU, &sa, NULL);  
+  sigaction(SIGTSTP, &sa, NULL);
+  sigaction(SIGINT, &sa, NULL);  
+
   static char line[4096];
   int line_num = 0;
-
+	
   /* Please only print shell prompts when standard input is not a tty */
   if (shell_is_interactive)
     fprintf(stdout, "%d: ", line_num);
@@ -136,7 +145,12 @@ int main(unused int argc, unused char* argv[]) {
   while (fgets(line, 4096, stdin)) {
     /* Split our line into words. */
     struct tokens* tokens = tokenize(line);
-
+	
+    if (tokens_get_length(tokens) == 0) {
+    	print_shell_prompt(shell_is_interactive, &line_num);
+    	tokens_destroy(tokens);
+	continue;
+    }
     /* Find which built-in function to run. */
     int fundex = lookup(tokens_get_token(tokens, 0));
 
@@ -144,7 +158,10 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-	
+	bool bg = false;
+	if (strcmp(tokens_get_token(tokens, tokens->tokens_length - 1), "&") == 0)
+		bg = true;
+		
 	/* there cannot be more commands than tokens_length */
 	int *cmd_start_indexes = malloc(sizeof(int) * tokens->tokens_length);
 	cmd_start_indexes[0] = 0;
@@ -160,7 +177,8 @@ int main(unused int argc, unused char* argv[]) {
 	}
 
 	/* fork child processes */
-	int cpid; 
+	int cpid;
+        int child_pgid;	
 	int child_idx; // index of child process, esp useful for commands invloving pipes
 
 	if (nprocs > 1) {
@@ -180,27 +198,47 @@ int main(unused int argc, unused char* argv[]) {
 
 		/* create child processes  */
 		for (int i = 0; i < nprocs; i++){
+			
 			cpid = fork();
+			if (cpid < 0){
+				fprintf(stderr, "fork: %s\n", strerror(errno));
+				break;
+			}
+
 			if (cpid == 0){	
+				sa.sa_handler = SIG_DFL;
+				sigaction(SIGTTOU, &sa, NULL);
+				sigaction(SIGTSTP, &sa, NULL);
+				sigaction(SIGINT, &sa, NULL);
 				child_idx= i;
 				if (i == 0){
+					/* first process in pipeline */
+					setpgrp();
 					dup2(pipe_arr[i][1], STDOUT_FILENO);
-					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
-				} else if (i == nprocs - 1){
-					dup2(pipe_arr[i - 1][0], STDIN_FILENO);
 					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
 				} else {
-					dup2(pipe_arr[i - 1][0], STDIN_FILENO);
-					dup2(pipe_arr[i][1], STDOUT_FILENO);
-					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+					setpgid(0, child_pgid);
+					if (i == nprocs - 1){
+						/* last process in pipeline */
+						dup2(pipe_arr[i - 1][0], STDIN_FILENO);
+						rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+					} else {
+						dup2(pipe_arr[i - 1][0], STDIN_FILENO);
+						dup2(pipe_arr[i][1], STDOUT_FILENO);
+						rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
+					}
 				}
 				if (rc < 0){
 					fprintf(stderr, "Error closing fds: %s\n", strerror(errno));	
 				}
 				break;
-			}  else if (cpid < 0){
-				fprintf(stderr, "fork: %s\n", strerror(errno));
-				break;
+			}else if (cpid > 0 && i == 0){
+				child_pgid = cpid;
+				/* set all children processes pgid to pid of first child */
+				setpgid(cpid, child_pgid);
+				/* set child_pgid to foreground */
+				if (!bg)
+					tcsetpgrp(shell_terminal, child_pgid);
 			}
 				
 		}
@@ -215,18 +253,35 @@ int main(unused int argc, unused char* argv[]) {
 		}
 	    
 	}else {
-		cpid = fork();
 		child_idx= 0;
+		cpid = fork();
+		
+		if (cpid > 0){
+			child_pgid = cpid;
+			setpgid(cpid, child_pgid);
+			/* set child_pgid to foreground */
+			if (!bg)
+				tcsetpgrp(shell_terminal, child_pgid);
+		} else if (cpid == 0){
+			setpgrp();
+			sa.sa_handler = SIG_DFL;
+			sigaction(SIGTTOU, &sa, NULL);
+			sigaction(SIGTSTP, &sa, NULL);
+			sigaction(SIGINT, &sa, NULL);
+		}
 	}
 
 	if (cpid > 0){
 		// parent process	
 		free(cmd_start_indexes);
 		
-		// wait until last child process terminates
-		waitpid(cpid, NULL, 0);
+		/* wait until last child process terminates */
+		if (!bg){
+			waitpid(cpid, NULL, 0);
+			tcsetpgrp(shell_terminal, shell_pgid);
+		}
 	} else if (cpid == 0){
-		// child process
+		
 		char* program = tokens->tokens[cmd_start_indexes[child_idx]];
 		int arg_c = 0;
 		char** args = malloc(sizeof(char*) * (tokens->tokens_length + 1));
@@ -250,7 +305,7 @@ int main(unused int argc, unused char* argv[]) {
 
 				dup2(fd, STDOUT_FILENO);
 				i += 2;
-			} else if (strcmp(tokens->tokens[i], "|") == 0){
+			} else if (strcmp(tokens->tokens[i], "|") == 0 || strcmp(tokens->tokens[i], "&") == 0){
 				break;
 			} else {
 				args[arg_c] = tokens->tokens[i];
@@ -283,9 +338,8 @@ int main(unused int argc, unused char* argv[]) {
 	}
     }
 
-    if (shell_is_interactive)
-      /* Please only print shell prompts when standard input is not a tty */
-      fprintf(stdout, "%d: ", ++line_num);
+     /* Please only print shell prompts when standard input is not a tty */
+    print_shell_prompt(shell_is_interactive, &line_num);
 
     /* Clean up memory */
     tokens_destroy(tokens);
