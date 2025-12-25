@@ -196,13 +196,12 @@ int main(unused int argc, unused char* argv[]) {
 		if (rc < 0)
 			continue;
 
-		/* create child processes  */
+	/* create child processes  */
 		for (int i = 0; i < nprocs; i++){
 			
 			cpid = fork();
 			if (cpid < 0){
 				fprintf(stderr, "fork: %s\n", strerror(errno));
-				break;
 			}
 
 			if (cpid == 0){	
@@ -211,25 +210,20 @@ int main(unused int argc, unused char* argv[]) {
 				sigaction(SIGTSTP, &sa, NULL);
 				sigaction(SIGINT, &sa, NULL);
 				child_idx= i;
-				if (i == 0){
-					/* first process in pipeline */
-					setpgrp();
+		
+				int pgid = (i == 0) ? 0: child_pgid;
+				setpgid(0, pgid);	
+				// if not first process read, from previous pipe
+				if (i > 0)
+					dup2(pipe_arr[i - 1][0], STDIN_FILENO);
+
+				// if not last process, write to the current pipe
+				if (i < nprocs - 1)
 					dup2(pipe_arr[i][1], STDOUT_FILENO);
-					rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
-				} else {
-					setpgid(0, child_pgid);
-					if (i == nprocs - 1){
-						/* last process in pipeline */
-						dup2(pipe_arr[i - 1][0], STDIN_FILENO);
-						rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
-					} else {
-						dup2(pipe_arr[i - 1][0], STDIN_FILENO);
-						dup2(pipe_arr[i][1], STDOUT_FILENO);
-						rc = close_unused_pipe_fds(pipe_arr, nprocs - 1, i);
-					}
-				}
-				if (rc < 0){
-					fprintf(stderr, "Error closing fds: %s\n", strerror(errno));	
+				
+				if (close_unused_pipe_fds(pipe_arr, nprocs - 1, i) < 0){
+					perror("child pipe close");
+					exit(1);
 				}
 				break;
 			}else if (cpid > 0 && i == 0){
@@ -245,10 +239,7 @@ int main(unused int argc, unused char* argv[]) {
 
 		if (cpid > 0) {
 			/* close all pipe fds for parent */
-			for (int i = 0; i < nprocs - 1; i++){
-				for (int j = 0; j < 2; j++)
-					close(pipe_arr[i][j]);
-			}
+			close_unused_pipe_fds(pipe_arr, nprocs - 1, -1);
 			free(pipe_arr);
 		}
 	    
@@ -277,7 +268,7 @@ int main(unused int argc, unused char* argv[]) {
 		
 		/* wait until last child process terminates */
 		if (!bg){
-			waitpid(cpid, NULL, 0);
+			waitpid(cpid, NULL, WUNTRACED);
 			tcsetpgrp(shell_terminal, shell_pgid);
 		}
 	} else if (cpid == 0){
