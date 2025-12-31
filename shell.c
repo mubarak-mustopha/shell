@@ -57,7 +57,7 @@ fun_desc_t cmd_table[] = {
 int cmd_wait(struct tokens* tokens){
 	if (tokens->tokens_length > 1){
 		fprintf(stderr, "wait takes no arguemnt\n");
-		return -1
+		return -1;
 	}
 
 	int rc;
